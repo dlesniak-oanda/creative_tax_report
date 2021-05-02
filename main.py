@@ -1,120 +1,155 @@
-# https://developer.atlassian.com/server/jira/platform/jira-rest-api-examples/#searching-for-issues-examples
-# oauth exanple https://bitbucket.org/atlassianlabs/atlassian-oauth-examples/src/master/python/app.py
+import json
+import os
+from collections import OrderedDict
+from datetime import datetime, timedelta
 
-import base64
-import oauth2 as oauth
 import requests
-import urllib.parse
+from requests.auth import HTTPBasicAuth
+from openpyxl import Workbook
 
-from tlslite.utils import keyfactory
-
-
-class SignatureMethod_RSA_SHA1(oauth.SignatureMethod):
-    name = 'RSA-SHA1'
-
-    def signing_base(self, request, consumer, token):
-        if not hasattr(request, 'normalized_url') or request.normalized_url is None:
-            raise ValueError("Base URL for request is not set.")
-
-        sig = (
-            oauth.escape(request.method),
-            oauth.escape(request.normalized_url),
-            oauth.escape(request.get_normalized_parameters()),
-        )
-
-        key = '%s&' % oauth.escape(consumer.secret)
-        if token:
-            key += oauth.escape(token.secret)
-        raw = '&'.join(sig)
-        return key, raw
-
-    def sign(self, request, consumer, token):
-        """Builds the base signature string."""
-        key, raw = self.signing_base(request, consumer, token)
-
-        with open('../rsa.pem', 'r') as f:
-            data = f.read()
-        privateKeyString = data.strip()
-
-        privatekey = keyfactory.parsePrivateKey(privateKeyString)
-        signature = privatekey.hashAndSign(raw)
-
-        return base64.b64encode(signature)
+TASKS_COLUMNS = [
+    'number',
+    'Kod w systemie/Code in system',
+    'Nazwa zadania/Task',
+    'Krótki opis (pierwsze 200 znaków)/Short description (first 200 characters)',
+    'TKP: Typ utworu (możemy przygotować katalog z którego pracownik wybierze jeden typ utworu, np. kod źródłowy, dokumentacja oprogramowania, grafika itd.) (in Polish)'
+]
 
 
-consumer_key = 'oauth-sample-consumer'
-consumer_secret = 'dont_care'
-
-request_token_url = 'http://localhost:8090/jira/plugins/servlet/oauth/request-token'
-access_token_url = 'http://localhost:8090/jira/plugins/servlet/oauth/access-token'
-authorize_url = 'http://localhost:8090/jira/plugins/servlet/oauth/authorize'
-
-data_url = 'http://localhost:8090/jira/rest/api/2/issue/BULK-1'
-
-consumer = oauth.Consumer(consumer_key, consumer_secret)
-client = oauth.Client(consumer)
-
-# Lets try to access a JIRA issue (BULK-1). We should get a 401.
-resp, content = client.request(data_url, "GET")
-if resp['status'] != '401':
-    raise Exception("Should have no access!")
-
-consumer = oauth.Consumer(consumer_key, consumer_secret)
-client = oauth.Client(consumer)
-client.set_signature_method(SignatureMethod_RSA_SHA1())
-
-# Step 1: Get a request token. This is a temporary token that is used for
-# having the user authorize an access token and to sign the request to obtain
-# said access token.
-
-resp, content = client.request(request_token_url, "POST")
-if resp['status'] != '200':
-    raise Exception("Invalid response %s: %s" % (resp['status'], content))
-
-request_token = dict(urllib.parse.parse_qsl(content))
-
-print("Request Token:    - oauth_token        = %s" % request_token['oauth_token'],
-      "    - oauth_token_secret = %s" % request_token['oauth_token_secret'])
+def get_jira_tasks():
+    domain = "https://oandacorp.atlassian.net/"
+    api_token = os.environ.get('JIRA_API_TOKEN', input("Provide Jira API Token"))
+    email = os.environ.get('EMAIL', input("What is your email addres"))
+    auth = HTTPBasicAuth(email, api_token)
+    headers = {
+        "Accept": "application/json"
+    }
+    query = {
+        'jql': 'Assignee = currentUser() AND status = "Done"',
+    }
+    response = requests.request(
+        "GET",
+        f"{domain}/rest/api/3/search",
+        headers=headers,
+        params=query,
+        auth=auth
+    )
+    return json.loads(response.text)
 
 
-# Step 2: Redirect to the provider. Since this is a CLI script we do not
-# redirect. In a web application you would redirect the user to the URL
-# below.
+def get_short_description(task):
+    short_description = ''
+    try:
+        for content_block in task['fields']['description']['content']:
+            for content in content_block['content']:
+                if content_block['type'] == 'paragraph' and content['type'] == 'text':
+                    short_description += content['text']
+                    if len(short_description) > 200:
+                        break
+            if len(short_description) > 200:
+                break
+    except:
+        return ''
+    return short_description[:200]
 
-print("Go to the following link in your browser:", "%s?oauth_token=%s" % (authorize_url, request_token['oauth_token']))
+
+def get_tasks_rows(data):
+    tasks = []
+    for number, task in enumerate(data['issues']):
+        tasks.append({
+            'number': number + 1,
+            'Kod w systemie/Code in system': task['key'],
+            'Nazwa zadania/Task': task['fields']['summary'],
+            # ['fields']['status']['name'] == In Progress
+            'Krótki opis (pierwsze 200 znaków)/Short description (first 200 characters)': get_short_description(task),
+            'TKP: Typ utworu (możemy przygotować katalog z którego pracownik wybierze jeden typ utworu, np. kod źródłowy, dokumentacja oprogramowania, grafika itd.) (in Polish)': 'kod źródłowy',
+        })
+    return tasks
 
 
-# After the user has granted access to you, the consumer, the provider will
-# redirect you to whatever URL you have told them to redirect to. You can
-# usually define this in the oauth_callback argument as well.
-accepted = 'n'
-while accepted.lower() == 'n':
-    accepted = input('Have you authorized me? (y/n) ')
-# oauth_verifier = input('What is the PIN? ')
+def get_start_end_month_day(month, year):
+    month, year = int(month), int(year)
+    start_date = datetime.now().replace(day=1, month=month, year=year).date()
+    if month == 12:
+        month_future = 1
+        year_future = +1
+    else:
+        month_future = month + 1
+        year_future = year
+    end_date = (start_date.replace(day=1, month=month_future, year=year_future) - timedelta(days=1))
+    return start_date, end_date
 
-# Step 3: Once the consumer has redirected the user back to the oauth_callback
-# URL you can request the access token the user has approved. You use the
-# request token to sign this request. After this is done you throw away the
-# request token and use the access token returned. You should store this
-# access token somewhere safe, like a database, for future use.
-token = oauth.Token(request_token['oauth_token'],
-                    request_token['oauth_token_secret'])
-# token.set_verifier(oauth_verifier)
-client = oauth.Client(consumer, token)
-client.set_signature_method(SignatureMethod_RSA_SHA1())
 
-resp, content = client.request(access_token_url, "POST")
-access_token = dict(urllib.parse.parse_qsl(content))
+def date_from_input(raw_date):
+    try:
+        month, year = raw_date.split('-')
+        return get_start_end_month_day(month=month, year=year)
+    except:
+        return None, None
 
-print("Access Token:", "    - oauth_token        = %s" % access_token['oauth_token'],
-      "    - oauth_token_secret = %s" % access_token['oauth_token_secret'],
-      "You may now access protected resources using the access tokens above.")
 
-# Now lets try to access the same issue again with the access token. We should get a 200!
-accessToken = oauth.Token(access_token['oauth_token'], access_token['oauth_token_secret'])
-client = oauth.Client(consumer, accessToken)
-client.set_signature_method(SignatureMethod_RSA_SHA1())
+def get_header(data):
+    date_now = datetime.now().date()
+    default_reporting_start, default_reporting_end = get_start_end_month_day(month=date_now.month, year=date_now.year)
+    employee_id = input('Employee ID\n')
+    job_position = input('Stanowisko/Job position\n')
+    while True:
+        reporting_period = input(
+            f'Okres raportowania/Reporting period format mm-yyyy (leave blank for {default_reporting_start}-{default_reporting_end})\n')
+        if not reporting_period:
+            start_date, end_date = default_reporting_start, default_reporting_end
+            break
+        start_date, end_date = date_from_input(reporting_period)
+        if start_date and end_date:
+            break
+        print(f'Invalid date {reporting_period}, try again')
 
-resp, content = client.request(data_url, "GET")
-if resp['status'] != '200':
-    raise Exception("Should have access!")
+    submission_date = input(f'Data zlozenia raportu/Submission date leave blank for {date_now}\n')
+    report_date = f'{start_date.day}-{end_date.day}.{start_date.month}.{start_date.year}'
+    submission_date = submission_date.strftime("%d.%m.%Y") if submission_date else date_now.strftime("%d.%m.%Y")
+
+    header = OrderedDict()
+    header['Imie i nazwisko/Name and surname'] = data['issues'][0]['fields']['assignee']['displayName']
+    header['Employee ID'] = employee_id
+    header['Stanowisko/Job position'] = job_position,
+    header['Okres raportowania/Reporting period'] = report_date
+    header['Data zlozenia raportu/Submission date'] = submission_date
+    return header
+
+
+def generate_xlsx(header, tasks):
+    workbook = Workbook()
+    sheet = workbook.active
+    populated_row_number = xlsx_populate_header(header, sheet)
+
+    column_letters = list("ABCDEFGHIJK")
+    for column_name, column_letter in zip(TASKS_COLUMNS, column_letters):
+        sheet[f'{populated_row_number}{column_letter}'] = column_name
+    populated_row_number += 1
+    for task in tasks:
+        for column in TASKS_COLUMNS:
+            populated_row_number
+
+    workbook.save(filename=f"creative-tax-{datetime.now().date()}.xlsx")
+
+
+def xlsx_populate_header(header, sheet):
+    row = 0
+    for key, value in header:
+        sheet[f'A{row}'] = key
+        sheet[f'B{row}'] = value
+        row += 1
+    return row
+
+
+data = get_jira_tasks()
+if data.get('issues'):
+    tasks = get_tasks_rows(data)
+    header = get_header(data)
+    generate_xlsx(header=header, tasks=tasks)
+    for task in tasks:
+        print(task)
+    print(f"{len(tasks)} tasks,")
+    print([task['Kod w systemie/Code in system'] for task in tasks])
+else:
+    print(data.get('errorMessages', 'Unexpected error, no issues'))
