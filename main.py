@@ -4,8 +4,11 @@ from collections import OrderedDict
 from datetime import datetime, timedelta
 
 import requests
+from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 from openpyxl import Workbook
+
+load_dotenv()
 
 TASKS_COLUMNS = [
     'number',
@@ -16,10 +19,17 @@ TASKS_COLUMNS = [
 ]
 
 
+def get_env_variable(name, input_message):
+    env_variable = os.environ.get(name, '')
+    if not env_variable:
+        env_variable = input(f'{input_message}\n')
+    return env_variable
+
+
 def get_jira_tasks():
     domain = "https://oandacorp.atlassian.net/"
-    api_token = os.environ.get('JIRA_API_TOKEN', input("Provide Jira API Token"))
-    email = os.environ.get('EMAIL', input("What is your email addres"))
+    api_token = get_env_variable(name='JIRA_API_TOKEN', input_message="Provide Jira API Token")
+    email = get_env_variable(name='EMAIL', input_message="What is your email addres connected to jira?")
     auth = HTTPBasicAuth(email, api_token)
     headers = {
         "Accept": "application/json"
@@ -91,8 +101,8 @@ def date_from_input(raw_date):
 def get_header(data):
     date_now = datetime.now().date()
     default_reporting_start, default_reporting_end = get_start_end_month_day(month=date_now.month, year=date_now.year)
-    employee_id = input('Employee ID\n')
-    job_position = input('Stanowisko/Job position\n')
+    employee_id = get_env_variable('EMPLOYEE_ID', 'Employee ID')
+    job_position = get_env_variable('JOB_POSITION', 'Stanowisko/Job position')
     while True:
         reporting_period = input(
             f'Okres raportowania/Reporting period format mm-yyyy (leave blank for {default_reporting_start}-{default_reporting_end})\n')
@@ -104,16 +114,14 @@ def get_header(data):
             break
         print(f'Invalid date {reporting_period}, try again')
 
-    submission_date = input(f'Data zlozenia raportu/Submission date leave blank for {date_now}\n')
     report_date = f'{start_date.day}-{end_date.day}.{start_date.month}.{start_date.year}'
-    submission_date = submission_date.strftime("%d.%m.%Y") if submission_date else date_now.strftime("%d.%m.%Y")
 
     header = OrderedDict()
     header['Imie i nazwisko/Name and surname'] = data['issues'][0]['fields']['assignee']['displayName']
     header['Employee ID'] = employee_id
     header['Stanowisko/Job position'] = job_position,
     header['Okres raportowania/Reporting period'] = report_date
-    header['Data zlozenia raportu/Submission date'] = submission_date
+    header['Data zlozenia raportu/Submission date'] = date_now.strftime("%d.%m.%Y")
     return header
 
 
