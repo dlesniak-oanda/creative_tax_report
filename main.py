@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 from openpyxl import Workbook
+from openpyxl.styles import Font
 
 load_dotenv()
 
@@ -26,7 +27,7 @@ def get_env_variable(name, input_message):
     return env_variable
 
 
-def get_jira_tasks():
+def get_jira_tasks(start_date, end_date):
     domain = "https://oandacorp.atlassian.net/"
     api_token = get_env_variable(name='JIRA_API_TOKEN', input_message="Provide Jira API Token")
     email = get_env_variable(name='EMAIL', input_message="What is your email addres connected to jira?")
@@ -37,6 +38,9 @@ def get_jira_tasks():
     query = {
         'jql': 'Assignee = currentUser() AND status = "Done"',
     }
+    if start_date and end_date:
+        # updatedDate  >=  "2018/10/01" and updatedDate   <= "2018/10/31"
+        query['jql'] += f'updatedDate  >=  "{start_date}" and updatedDate   <= "{end_date}"'
     response = requests.request(
         "GET",
         f"{domain}/rest/api/3/search",
@@ -45,6 +49,22 @@ def get_jira_tasks():
         auth=auth
     )
     return json.loads(response.text)
+
+
+def get_reporting_period():
+    date_now = datetime.now().date()
+    default_reporting_start, default_reporting_end = get_start_end_month_day(month=date_now.month, year=date_now.year)
+    while True:
+        reporting_period = input(
+            f'Okres raportowania/Reporting period format mm-yyyy (leave blank for date from {default_reporting_start} to {default_reporting_end})\n')
+        if not reporting_period:
+            start_date, end_date = default_reporting_start, default_reporting_end
+            break
+        start_date, end_date = date_from_input(reporting_period)
+        if start_date and end_date:
+            break
+        print(f'Invalid date {reporting_period}, try again')
+    return start_date, end_date
 
 
 def get_short_description(task):
@@ -98,21 +118,9 @@ def date_from_input(raw_date):
         return None, None
 
 
-def get_header(data):
-    date_now = datetime.now().date()
-    default_reporting_start, default_reporting_end = get_start_end_month_day(month=date_now.month, year=date_now.year)
+def get_header(data, start_date, end_date):
     employee_id = get_env_variable('EMPLOYEE_ID', 'Employee ID')
     job_position = get_env_variable('JOB_POSITION', 'Stanowisko/Job position')
-    while True:
-        reporting_period = input(
-            f'Okres raportowania/Reporting period format mm-yyyy (leave blank for {default_reporting_start}-{default_reporting_end})\n')
-        if not reporting_period:
-            start_date, end_date = default_reporting_start, default_reporting_end
-            break
-        start_date, end_date = date_from_input(reporting_period)
-        if start_date and end_date:
-            break
-        print(f'Invalid date {reporting_period}, try again')
 
     report_date = f'{start_date.day}-{end_date.day}.{start_date.month}.{start_date.year}'
 
@@ -121,7 +129,7 @@ def get_header(data):
     header['Employee ID'] = employee_id
     header['Stanowisko/Job position'] = job_position,
     header['Okres raportowania/Reporting period'] = report_date
-    header['Data zlozenia raportu/Submission date'] = date_now.strftime("%d.%m.%Y")
+    header['Data zlozenia raportu/Submission date'] = datetime.now().date().strftime("%d.%m.%Y")
     return header
 
 
@@ -129,31 +137,46 @@ def generate_xlsx(header, tasks):
     workbook = Workbook()
     sheet = workbook.active
     populated_row_number = xlsx_populate_header(header, sheet)
-
-    column_letters = list("ABCDEFGHIJK")
-    for column_name, column_letter in zip(TASKS_COLUMNS, column_letters):
-        sheet[f'{populated_row_number}{column_letter}'] = column_name
     populated_row_number += 1
-    for task in tasks:
-        for column in TASKS_COLUMNS:
-            populated_row_number
+    column_letters = list("ABCDEFGHIJK")
+    populate_body(column_letters, populated_row_number, sheet, tasks, workbook)
 
+
+def populate_body(column_letters, populated_row_number, sheet, tasks, workbook):
+    for column_name, column_letter in zip(TASKS_COLUMNS, column_letters):
+        sheet[f'{column_letter}{populated_row_number}'] = column_name
+        sheet[f'{column_letter}{populated_row_number}'].font = Font(bold=True)
+    for task in tasks:
+        populated_row_number += 1
+        for column_letter, column_name in zip(column_letters, TASKS_COLUMNS):
+            sheet[f'{column_letter}{populated_row_number}'] = task[column_name]
+    adjust_columns_width(sheet)
     workbook.save(filename=f"creative-tax-{datetime.now().date()}.xlsx")
 
 
-def xlsx_populate_header(header, sheet):
-    row = 0
-    for key, value in header:
-        sheet[f'A{row}'] = key
-        sheet[f'B{row}'] = value
+def adjust_columns_width(ws):
+    for column_cells in ws.columns:
+        length = max(len(str(cell.value)) for cell in column_cells)
+        ws.column_dimensions[column_cells[0].column_letter].width = length
+
+
+def xlsx_populate_header(header, sheet, row=1):
+    try:
+        for key, value in header.items():
+            sheet[f'A{row}'] = key
+            sheet[f'B{row}'] = value
+            row += 1
+    except ValueError:
+        sheet[f'B{row}'] = value[0]
         row += 1
     return row
 
 
-data = get_jira_tasks()
+start_date, end_date = get_reporting_period()
+data = get_jira_tasks(start_date, end_date)
 if data.get('issues'):
     tasks = get_tasks_rows(data)
-    header = get_header(data)
+    header = get_header(data, start_date, end_date)
     generate_xlsx(header=header, tasks=tasks)
     for task in tasks:
         print(task)
