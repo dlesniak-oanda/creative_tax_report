@@ -15,3 +15,11 @@
 export EMAIL=<your_email>
 export JIRA_API_TOKEN=<jira_token>
 export CREATIVE_TAX_EMAIL=<email_recipient>
+
+## Instalation
+
+pip install -r requirements.txt
+
+## Usage
+
+python3 main.py
