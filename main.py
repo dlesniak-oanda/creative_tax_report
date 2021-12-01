@@ -102,7 +102,7 @@ def get_start_end_month_day(month, year):
     start_date = datetime.now().replace(day=1, month=month, year=year).date()
     if month == 12:
         month_future = 1
-        year_future = +1
+        year_future = year + 1
     else:
         month_future = month + 1
         year_future = year
