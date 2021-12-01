@@ -178,7 +178,7 @@ if data.get('issues'):
     tasks = get_tasks_rows(data)
     header = get_header(data, start_date, end_date)
     workbook = generate_xlsx(header=header, tasks=tasks)
-    workbook.save(filename=f"creative-tax-{start_date.date()}.xlsx")
+    workbook.save(filename=f"creative-tax-{start_date}.xlsx")
 
     for task in tasks:
         print(task)
