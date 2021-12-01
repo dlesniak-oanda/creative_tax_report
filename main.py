@@ -140,6 +140,7 @@ def generate_xlsx(header, tasks):
     populated_row_number += 1
     column_letters = list("ABCDEFGHIJK")
     populate_body(column_letters, populated_row_number, sheet, tasks, workbook)
+    return workbook
 
 
 def populate_body(column_letters, populated_row_number, sheet, tasks, workbook):
@@ -151,7 +152,6 @@ def populate_body(column_letters, populated_row_number, sheet, tasks, workbook):
         for column_letter, column_name in zip(column_letters, TASKS_COLUMNS):
             sheet[f'{column_letter}{populated_row_number}'] = task[column_name]
     adjust_columns_width(sheet)
-    workbook.save(filename=f"creative-tax-{datetime.now().date()}.xlsx")
 
 
 def adjust_columns_width(ws):
@@ -177,7 +177,9 @@ data = get_jira_tasks(start_date, end_date)
 if data.get('issues'):
     tasks = get_tasks_rows(data)
     header = get_header(data, start_date, end_date)
-    generate_xlsx(header=header, tasks=tasks)
+    workbook = generate_xlsx(header=header, tasks=tasks)
+    workbook.save(filename=f"creative-tax-{start_date.date()}.xlsx")
+
     for task in tasks:
         print(task)
     print(f"{len(tasks)} tasks,")
