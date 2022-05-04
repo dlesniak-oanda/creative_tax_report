@@ -40,7 +40,8 @@ def get_jira_tasks(start_date, end_date):
     }
     if start_date and end_date:
         # updatedDate  >=  "2018/10/01" and updatedDate   <= "2018/10/31"
-        query['jql'] += f' AND updatedDate  >=  "{start_date}" and updatedDate   <= "{end_date}"'
+        print(f"Custom Date:{start_date} to {end_date}")
+        query['jql'] += f' AND resolved >= "{start_date}" AND resolved <= "{end_date}"'
     response = requests.request(
         "GET",
         f"{domain}/rest/api/3/search",
